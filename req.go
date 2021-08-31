@@ -1,6 +1,7 @@
 package req
 
 import (
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -8,9 +9,11 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	utls "github.com/refraction-networking/utls"
 	"io"
 	"io/ioutil"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/textproto"
 	"net/url"
@@ -112,6 +115,7 @@ type Req struct {
 	xmlEncOpts       *xmlEncOpts
 	flag             int
 	progressInterval time.Duration
+	replaceOriginTLS bool
 }
 
 // New create a new *Req
@@ -300,6 +304,25 @@ func (r *Req) Do(method, rawurl string, vs ...interface{}) (resp *Resp, err erro
 		return nil, err
 	}
 	req.URL = u
+	var tlsConn *utls.UConn
+	if r.replaceOriginTLS {
+		var addr string
+		if u.Scheme == "https" {
+			addr = u.Host + ":443"
+		} else {
+			addr = u.Host + ":80"
+		}
+		config := utls.Config{ServerName: u.Host}
+		dialConn, err := net.DialTimeout("tcp", addr, time.Second*30)
+		if err != nil {
+			return nil, fmt.Errorf("net.DialTimeout error: %+v", err)
+		}
+		tlsConn = utls.UClient(dialConn, &config, utls.HelloRandomizedNoALPN)
+		err = tlsConn.Handshake()
+		if err != nil {
+			return nil, fmt.Errorf("uTlsConn.Handshake() error: %+v", err)
+		}
+	}
 
 	if host := req.Header.Get("Host"); host != "" {
 		req.Host = host
@@ -320,7 +343,15 @@ func (r *Req) Do(method, rawurl string, vs ...interface{}) (resp *Resp, err erro
 		after := time.Now()
 		resp.cost = after.Sub(before)
 	} else {
-		response, err = resp.client.Do(req)
+		if r.replaceOriginTLS {
+			err = req.Write(tlsConn)
+			if err != nil {
+				return nil, err
+			}
+			response, err = http.ReadResponse(bufio.NewReader(tlsConn), req)
+		} else {
+			response, err = resp.client.Do(req)
+		}
 	}
 	if err != nil {
 		return nil, err

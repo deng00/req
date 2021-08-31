@@ -96,6 +96,15 @@ func EnableInsecureTLS(enable bool) {
 	std.EnableInsecureTLS(enable)
 }
 
+// ReplaceOriginTLS not use default tls lib
+func (r *Req) ReplaceOriginTLS() {
+	r.replaceOriginTLS = true
+}
+
+func ReplaceOriginTLS() {
+	std.ReplaceOriginTLS()
+}
+
 // EnableCookieenable or disable cookie manager
 func (r *Req) EnableCookie(enable bool) {
 	if enable {
